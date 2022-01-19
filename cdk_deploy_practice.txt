@@ -1,0 +1,74 @@
+这两天开始学习AWS的CDK应用部署，折腾了一阵，以下是自己记录的经验过程。
+
+开始之前需要先设置好用户的权限，有些问题都是因为权限不足造成的，我这里没有做细致的权限设置，直接给与了用户SystemAdministor的Role（有时间再仔细研究下权限设置）。
+系统安装的软件版本如下：
+npm --version
+8.1.2
+npm list -g
++-- aws-cdk-lib@2.8.0
++-- aws-cdk@2.8.0
++-- aws-sdk@2.1059.0
+`-- typescript@4.5.4
+
+在VS Code里的命令行里，做如下操作
+1. 新建目录
+mkdir fun
+cd fun
+2. 初始化应用环境
+cdk init app -l typescript
+
+初始化完成后，可以看到packege.json里定义的软件版本
+
+├── @types/jest@26.0.24
+├── @types/node@10.17.27
+├── aws-cdk-lib@2.8.0
+├── aws-cdk@2.8.0
+├── constructs@10.0.38
+├── jest@26.6.3
+├── source-map-support@0.5.21
+├── ts-jest@26.5.6
+├── ts-node@9.1.1
+└── typescript@3.9.10
+
+3. 新建一个AWS stack
+ 
+AWS的CDK已经升级到V2，但是以前大部分的教程案例都是按V1编写的。主要的改变是以下代码的第二行，可以直接从aws-cdk-lib里import需要的结构，而不要单独安装@aws-cdk/aws-ecs这些包，这些包已经停止更新，并且与现在的cdk V2不兼容。
+
+import { Construct } from 'constructs';
+import { Stack, StackProps, aws_ecs as ecs, aws_ecs_patterns as ecs_patterns, aws_ec2 as ec2 } from 'aws-cdk-lib'
+export class funStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    const vpc = new ec2.Vpc(this, "MyVpc", {maxAzs: 2});
+    const cluster = new ecs.Cluster(this, "MyCluster", {vpc: vpc});
+    new ecs_patterns.ApplicationLoadBalancedFargateService(this, "MyFargateService", {
+        cluster: cluster,
+        taskImageOptions: { image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample") },
+        publicLoadBalancer: true
+});
+  }
+}
+一个小提示是每次更改文件后都要记着保存一下再做其它操作！
+
+4. 执行 cdk synth， 会有一个Assert，
+AssertDescription: CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI
+
+按照提示执行cdk bootstrap，
+
+bootstrap会创建执行cloudformation stack所需要的一些资源，比如S3 bucket，相关的权限设置等等。它本身也是一个cloudformation stack，名字叫CDKToolkit，bootstrap的过程就是部署这个stack。
+如果需要重新部署，删除了CDKToolkit stack的话, 记住也需要手工删除对应的s3 bucket，名字类似于cdk-xxx-assets-xxx-us-east-1
+
+5. bootstrap完成以后，如果还执行cdk synth，仍然会出现Assert提示
+AssertDescription: CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI
+根据https://github.com/aws/aws-cdk/issues/17942 的解释，这是V2的新特性，可以忽略。。。但是他的解释我一时还是没理解，明明SSM get parameter的值是10，但bootstrap一定认为是<6，这当然是一个bug啊？。。。
+
+6. 执行cdk diff，仍然会看到这个恼人的Assert
+Other Changes
+[+] Unknown Rules: {"CheckBootstrapVersion":{"Assertions":[{"Assert":{"Fn::Not":[{"Fn::Contains":[["1","2","3","4","5"],{"Ref":"BootstrapVersion"}]}]},"AssertDescription":"CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."}]}}
+
+7. 不管这个assert，执行cdk deploy，如果不出意外，stack会顺利部署成功！！！
+
+记住可以用cdk destroy 删掉这个部署，否则有些资源就开始计费了。
+
+
+
